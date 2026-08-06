@@ -6,8 +6,23 @@ services:
     # ports:
     #   - "1883:1883"
     volumes:
-      - ./mosquitto/config:/mosquitto/config:ro
-      - ./mosquitto/data:/mosquitto/data
+      - ${APPDATA:-/mnt/user/appdata/vanguard}/mosquitto/config:/mosquitto/config
+      - ${APPDATA:-/mnt/user/appdata/vanguard}/mosquitto/data:/mosquitto/data
+    command:
+      - sh
+      - -c
+      - |
+        if [ ! -f /mosquitto/config/mosquitto.conf ]; then
+          printf '%s\n' \
+            'listener 1883' \
+            'allow_anonymous true' \
+            'persistence true' \
+            'persistence_location /mosquitto/data/' \
+            'log_dest stdout' \
+            > /mosquitto/config/mosquitto.conf
+          echo "seeded default mosquitto.conf"
+        fi
+        exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
 
   frigate:
     image: ghcr.io/blakeblackshear/frigate:stable
@@ -26,10 +41,9 @@ services:
     #           count: 1
     #           capabilities: [gpu]
     volumes:
-      - ${CONFIG_PATH:-./frigate-data}:/config
-      - ./frigate/config.yml:/config/config.yml:ro
+      - ${CONFIG_PATH:-/mnt/user/appdata/vanguard/frigate}:/config
       - /etc/localtime:/etc/localtime:ro
-      - ${MEDIA_PATH:-./media}:/media/frigate
+      - ${MEDIA_PATH:-/mnt/user/frigate}:/media/frigate
       - type: tmpfs
         target: /tmp/cache
         tmpfs:
@@ -40,7 +54,7 @@ services:
       # - "8555:8555/tcp"
       # - "8555:8555/udp"
     environment:
-      FRIGATE_RTSP_PASSWORD: ${RTSP_PASSWORD}
+      FRIGATE_RTSP_PASSWORD: ${RTSP_PASSWORD:-}
 
   ntfy-bridge:
     image: ghcr.io/kaiserdrake/vanguard-ntfy-bridge:latest
@@ -50,7 +64,7 @@ services:
       - mosquitto
       - frigate
     volumes:
-      - ./cameras-meta.yml:/config/cameras-meta.yml:ro
+      - ${APPDATA:-/mnt/user/appdata/vanguard}/ntfy-bridge:/config
     environment:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883
@@ -68,7 +82,7 @@ services:
     depends_on:
       - mosquitto
     volumes:
-      - ./scheduler/schedule.yml:/config/schedule.yml:ro
+      - ${APPDATA:-/mnt/user/appdata/vanguard}/scheduler:/config
     environment:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883

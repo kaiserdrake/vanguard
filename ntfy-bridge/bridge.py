@@ -25,10 +25,22 @@ CAMERA_META_PATH = os.environ.get("CAMERA_META_PATH", "/config/cameras-meta.yml"
 
 
 def load_camera_labels() -> dict:
+    """Friendly camera names, entirely optional — without them the camera key
+    is prettified instead.
+
+    /config is a directory bind mount that is empty on a first deploy, so the
+    file is normally just absent. Docker also creates a missing *file* mount
+    source as a directory, which surfaces as IsADirectoryError rather than
+    FileNotFoundError; neither is worth crash-looping the bridge over.
+    """
     try:
         with open(CAMERA_META_PATH) as f:
             return yaml.safe_load(f) or {}
-    except FileNotFoundError:
+    except (FileNotFoundError, IsADirectoryError):
+        print(f"[bridge] no {CAMERA_META_PATH}, using camera names as labels")
+        return {}
+    except (OSError, yaml.YAMLError) as exc:
+        print(f"[bridge] ignoring unreadable {CAMERA_META_PATH}: {exc}")
         return {}
 
 

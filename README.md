@@ -48,7 +48,18 @@ publishes to GHCR; mosquitto and Frigate come from upstream images.
    deny anonymous publish *and* anonymous read, and give the bridge a
    write-only token.
 
-3. **Edit `frigate/config.yml`**
+3. **Start it**
+   ```bash
+   docker compose up -d
+   ```
+
+   Nothing needs to be staged first. Every mount is a directory, so docker
+   creates what's missing; mosquitto seeds its own `mosquitto.conf` and
+   Frigate writes a starter `config.yaml` on first boot.
+
+4. **Configure Frigate** from its UI at `https://<host>:8971`, under
+   **Settings → Config Editor**. `frigate/config.yml` in this repo is a
+   worked example to copy from — it is not mounted into the container.
    - Replace the `front_door` / `backyard` camera blocks with your actual
      RTSP URLs and credentials.
    - Point each camera's **detect** role at its low-res substream and the
@@ -62,12 +73,14 @@ publishes to GHCR; mosquitto and Frigate come from upstream images.
    - The `objects.track` list controls what Frigate looks for; `NOTIFY_LABELS`
      in `.env` controls the subset that actually triggers a push.
 
-4. **Start it**
-   ```bash
-   docker compose up -d
-   ```
+5. **Optional config files**, dropped into `$APPDATA` once the stack has
+   created the directories. Both services run fine without them:
+   - `$APPDATA/ntfy-bridge/cameras-meta.yml` — friendly camera names for
+     notification titles; without it the camera key is prettified.
+   - `$APPDATA/scheduler/schedule.yml` — time-of-day camera control; without
+     it the scheduler idles. Copy `scheduler/schedule.yml` from this repo.
 
-5. **Verify**
+6. **Verify**
    - Frigate UI: `https://<host>:8971` — log in, then check the feeds are live and
      tune motion masks per-camera here (reduces false triggers from trees,
      passing traffic on a street-facing camera, etc.).
@@ -214,6 +227,28 @@ included — would silently build from source rather than run the CI-tested
 images, and you'd only notice when a local-only change reached the real stack.
 
 ## Unraid
+
+Unraid's Compose Manager creates a project directory holding just a compose
+file and an override — there's no git clone, so **relative bind mounts to
+files in this repo can never resolve there.** Docker creates a missing bind
+source as a *directory*, so `./cameras-meta.yml` becomes a directory and the
+container dies with `IsADirectoryError`; a config directory comes up empty and
+mosquitto exits with `Unable to open config file`.
+
+The compose file therefore mounts only directories, under `$APPDATA`, and
+every service either seeds its own config or runs without one. Paste
+`docker-compose.yml` into Compose Manager, set the variables from
+`.env.example` in the project's env, and start it — nothing to stage by hand.
+
+If you already tried an earlier version, delete the directories docker
+created in their place first, or the real files can't be written:
+
+```bash
+rm -rf cameras-meta.yml frigate/config.yml scheduler/schedule.yml mosquitto
+```
+
+Run that inside the Compose Manager project directory, and check what it is
+before deleting — those paths should be empty directories, not your data.
 
 Icons and the WebUI link are set through Unraid's own Docker UI rather than
 compose labels, so the compose file stays portable and Unraid remains the

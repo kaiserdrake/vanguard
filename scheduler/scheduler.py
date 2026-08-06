@@ -17,9 +17,31 @@ DAY_NAMES = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 _last_state = {}
 
 
+# Whether we've already complained about the schedule file, so a missing one
+# logs once at startup instead of every CHECK_INTERVAL forever.
+_warned_about_schedule = False
+
+
 def load_schedules() -> list:
-    with open(SCHEDULE_PATH) as f:
-        return (yaml.safe_load(f) or {}).get("schedules", [])
+    """No schedule file means no time-based control, which is a valid way to
+    run the stack — idle quietly rather than crash-looping.
+
+    /config is a directory bind mount that is empty on a first deploy. Docker
+    also creates a missing *file* mount source as a directory, which raises
+    IsADirectoryError instead of FileNotFoundError.
+    """
+    global _warned_about_schedule
+    try:
+        with open(SCHEDULE_PATH) as f:
+            schedules = (yaml.safe_load(f) or {}).get("schedules", [])
+        _warned_about_schedule = False
+        return schedules
+    except (FileNotFoundError, IsADirectoryError, OSError, yaml.YAMLError) as exc:
+        if not _warned_about_schedule:
+            print(f"[scheduler] no usable schedule at {SCHEDULE_PATH} ({exc}); "
+                  "idling until one appears")
+            _warned_about_schedule = True
+        return []
 
 
 def parse_hm(value: str) -> datetime.time:
