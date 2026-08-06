@@ -215,34 +215,25 @@ images, and you'd only notice when a local-only change reached the real stack.
 
 ## Unraid
 
-All four services carry a `net.unraid.docker.icon` label so they show the
-Vanguard shield in Unraid's Docker tab instead of the default placeholder, and
-Frigate also carries `net.unraid.docker.webui` so its **WebUI** button opens
-`https://<server>:8971`. Both are plain labels — on a non-Unraid host they are
-inert metadata and nothing reads them.
+Icons and the WebUI link are set through Unraid's own Docker UI rather than
+compose labels, so the compose file stays portable and Unraid remains the
+single source of truth for how containers are presented.
 
-Unraid's webgui reads the icon off the host filesystem, so the file has to
-exist there before the stack starts:
+`unraid/vanguard.png` is a ready-made icon for the stack. Copy it somewhere
+the webgui can read and point each container's **Icon URL** at that path:
 
 ```bash
 mkdir -p /mnt/user/appdata/vanguard
 cp unraid/vanguard.png /mnt/user/appdata/vanguard/
 ```
 
-That path is the default; override it with `UNRAID_ICON` in `.env` if you keep
-icons somewhere else. Three things worth knowing:
+For Frigate's **WebUI** field use `https://[IP]:[PORT:8971]` — `https://`
+because 8971 serves TLS with a self-signed cert, and `[IP]`/`[PORT:x]` are
+Unraid placeholders it substitutes when rendering the link.
 
-- **PNG only.** Unraid shows a question mark for SVG icons and renders nothing
-  at all for WebP. `unraid/vanguard.svg` is the source; `unraid/vanguard.png`
-  is what Unraid actually loads. Re-render with `unraid/render-icon.sh` after
-  editing the SVG.
-- **Absolute host path.** Not a path inside a container, and not relative —
-  the webgui resolves it directly. A remote URL works on current Unraid
-  releases but breaks the tab whenever DNS or the remote host is unreachable,
-  which is why the local file is the default here.
-- **Labels only apply on create.** Editing them in Unraid's UI stops the
-  compose file from updating them again. If an icon looks stale, clear it in
-  the UI and recreate the container rather than just restarting it.
+Use PNG: Unraid shows a question mark for SVG icons and renders nothing at all
+for WebP. `unraid/vanguard.svg` is the source; re-render with
+`unraid/render-icon.sh` after editing it.
 
 ## Network exposure
 
@@ -258,6 +249,14 @@ it on the host. `ntfy-bridge` reaches it as `http://frigate:5000` over the
 internal docker network, which requires no port mapping. Publishing 5000, or
 putting a reverse proxy in front of it, hands out full access to your cameras
 and recordings.
+
+Mosquitto's `1883` is not published either, and that one matters more than it
+looks: the broker runs with `allow_anonymous true`, so exposing it to the LAN
+would let anyone publish to `frigate/<camera>/<control>/set` and switch
+cameras, detection or recording off. Frigate, ntfy-bridge and scheduler all
+reach it over the internal docker network. Publish it only for an off-host
+MQTT client such as Home Assistant, and add a password file to
+`mosquitto.conf` first if you do.
 
 `8554` (RTSP restream) and `8555` (WebRTC) are commented out for the same
 reason — both are unauthenticated. Dropping 8555 only costs you WebRTC live

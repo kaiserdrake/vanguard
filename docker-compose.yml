@@ -3,37 +3,22 @@ services:
     image: eclipse-mosquitto:2
     container_name: mosquitto
     restart: unless-stopped
-    # 1883 is intentionally not published. The broker runs with
-    # allow_anonymous, so exposing it to the LAN would let anyone publish to
-    # frigate/<camera>/<control>/set and switch cameras or recording off.
-    # frigate, ntfy-bridge and scheduler all reach it over the internal docker
-    # network. Uncomment only for an off-host MQTT client (e.g. Home
-    # Assistant), and add a password file to mosquitto.conf first if you do.
     # ports:
     #   - "1883:1883"
     volumes:
       - ./mosquitto/config:/mosquitto/config
       - ./mosquitto/data:/mosquitto/data
       - ./mosquitto/log:/mosquitto/log
-    labels:
-      # Unraid Docker tab icon — see "Unraid" in the README.
-      net.unraid.docker.icon: ${UNRAID_ICON:-/mnt/user/appdata/vanguard/vanguard.png}
 
   frigate:
-    # Plain :stable — the OpenVINO detector and VAAPI decode configured in
-    # frigate/config.yml run on the Intel iGPU. Switch to :stable-tensorrt and
-    # restore the `deploy:` block below only for an NVIDIA host.
     image: ghcr.io/blakeblackshear/frigate:stable
     container_name: frigate
     restart: unless-stopped
-    shm_size: "256mb" # bump if you add more cameras or higher resolutions
+    shm_size: "256mb"
     depends_on:
       - mosquitto
     devices:
-      # Required, not optional: the OpenVINO detector and hardware video
-      # decode both need the iGPU.
       - /dev/dri:/dev/dri
-    # NVIDIA hosts only:
     # deploy:
     #   resources:
     #     reservations:
@@ -42,13 +27,6 @@ services:
     #           count: 1
     #           capabilities: [gpu]
     volumes:
-      # Persistent state: frigate.db (the event and recording index), the auth
-      # user table, .jwt_secret and the model cache all live in /config. Without
-      # this mount, recreating the container silently loses every event, logs
-      # everyone out, and regenerates the admin password.
-      # config.yml is layered read-only on top — docker mounts the directory
-      # first, then the file, so git stays the source of truth for the config
-      # while Frigate keeps its data.
       - ${CONFIG_PATH:-./frigate-data}:/config
       - ./frigate/config.yml:/config/config.yml:ro
       - /etc/localtime:/etc/localtime:ro
@@ -58,23 +36,12 @@ services:
         tmpfs:
           size: 1000000000
     ports:
-      # 8971 is Frigate's authenticated UI/API and is the only port published
-      # to the LAN. Port 5000 is deliberately NOT here — Frigate serves it with
-      # no authentication at all, and nothing needs it on the host: ntfy-bridge
-      # reaches it as http://frigate:5000 over the internal docker network.
       - "8971:8971"
-      # Both of these are unauthenticated too. Uncomment only if you need them:
-      # - "8554:8554"     # RTSP restream for other consumers
-      # - "8555:8555/tcp" # WebRTC live view; without it the UI falls back to
-      # - "8555:8555/udp" # MSE, which works fine, just with more latency
+      # - "8554:8554"
+      # - "8555:8555/tcp"
+      # - "8555:8555/udp"
     environment:
       FRIGATE_RTSP_PASSWORD: ${RTSP_PASSWORD}
-    labels:
-      net.unraid.docker.icon: ${UNRAID_ICON:-/mnt/user/appdata/vanguard/vanguard.png}
-      # Makes Unraid's WebUI button open Frigate. https:// because 8971 serves
-      # TLS with a self-signed cert; [IP] and [PORT:x] are Unraid placeholders
-      # it substitutes at render time, not compose variables.
-      net.unraid.docker.webui: "https://[IP]:[PORT:8971]"
 
   ntfy-bridge:
     image: ghcr.io/kaiserdrake/vanguard-ntfy-bridge:latest
@@ -90,15 +57,10 @@ services:
       MQTT_PORT: 1883
       FRIGATE_URL: http://frigate:5000
       FRIGATE_UI_URL: ${FRIGATE_UI_URL:-http://localhost:5000}
-      # No defaults: the topic name is the access control on a public ntfy
-      # server, so it must come from .env and never from a tracked file.
       NTFY_URL: ${NTFY_URL:?set NTFY_URL in .env}
       NTFY_TOPIC: ${NTFY_TOPIC:?set NTFY_TOPIC in .env}
       NTFY_AUTH_TOKEN: ${NTFY_AUTH_TOKEN:-}
-      # only push for these labels; comma separated, matches frigate objects
       NOTIFY_LABELS: ${NOTIFY_LABELS:-person,car,dog,cat}
-    labels:
-      net.unraid.docker.icon: ${UNRAID_ICON:-/mnt/user/appdata/vanguard/vanguard.png}
 
   scheduler:
     image: ghcr.io/kaiserdrake/vanguard-scheduler:latest
@@ -112,5 +74,3 @@ services:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883
       TZ: ${TZ:-UTC}
-    labels:
-      net.unraid.docker.icon: ${UNRAID_ICON:-/mnt/user/appdata/vanguard/vanguard.png}
