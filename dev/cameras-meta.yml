@@ -1,6 +1,11 @@
-# Camera labels for the test-deploy profile (docker-compose.dev.yml), mounted
+# Camera settings for the test-deploy profile (docker-compose.dev.yml), mounted
 # read-only straight from the repo — the dev stack has no $APPDATA and seeds
-# nothing. `front_door` is here because the README's manual MQTT test fakes a
-# detection on that camera.
-test_cam: Test camera
+# nothing. See defaults/ntfy-bridge/cameras-meta.yml for what the keys mean.
+#
+# `front_door` is here because the README's manual MQTT test fakes a detection
+# on that camera; the mapping form on test_cam exercises the per-camera path.
+test_cam:
+  name: Test camera
+  labels: [person, car, dog]
+  priority: low
 front_door: Front door

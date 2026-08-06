@@ -106,12 +106,14 @@ creates is owned by root.
      comments in the file for the NVIDIA/tensorrt and CPU alternatives, and
      update the `image:` tag on the `frigate` service to match if you switch.
    - The `objects.track` list controls what Frigate looks for; `NOTIFY_LABELS`
-     in `.env` controls the subset that actually triggers a push.
+     in `.env` controls the subset that actually triggers a push. Both can be
+     overridden per camera.
 
 6. **Optional, per camera**, both seeded empty and both fine left that way:
-   - `$APPDATA/ntfy-bridge/cameras-meta.yml` — friendly camera names for
-     notification titles; without an entry the camera key is prettified
-     (`front_door` → `Front door`).
+   - `$APPDATA/ntfy-bridge/cameras-meta.yml` — display name, label list and
+     ntfy priority per camera; without an entry the camera uses
+     `NOTIFY_LABELS` and a prettified key (`front_door` → `Front door`). See
+     "Per-camera notifications" below.
    - `$APPDATA/scheduler/schedule.yml` — time-of-day camera control; with no
      entries the scheduler idles.
 
@@ -123,15 +125,41 @@ creates is owned by root.
      shows up in the ntfy iOS app subscribed to your `NTFY_TOPIC`.
    - `docker compose logs -f ntfy-bridge` to debug notification delivery.
 
-## Camera labels
+## Per-camera notifications
 
-`$APPDATA/ntfy-bridge/cameras-meta.yml` maps each camera's Frigate config key
-(e.g. `front_door`) to a friendly display name. Frigate itself doesn't read
-this file — it's used by `ntfy-bridge` for notification titles, and is there
-for any custom UI you build later. It's seeded empty, which is a fine way to
-leave it: a camera with no entry gets its key prettified instead. Edit it and
-restart `ntfy-bridge` (`docker compose restart ntfy-bridge`) to pick up
-changes.
+`$APPDATA/ntfy-bridge/cameras-meta.yml` keys off each camera's Frigate config
+key (e.g. `front_door`). Frigate never reads it: Frigate decides what to
+*detect*, this decides what to *push*. Edit it and restart `ntfy-bridge`
+(`docker compose restart ntfy-bridge`) to pick up changes.
+
+A plain string is just a display name. A mapping sets any subset of three keys:
+
+```yaml
+front_door:
+  name: Porch             # notification title; default is the key prettified
+  labels: [person, car]   # what pushes here; default is NOTIFY_LABELS
+  priority: high          # min | low | default | high | urgent
+driveway:
+  labels: [car]           # people on the street don't wake anyone up
+shed:
+  labels: []              # recorded and detected, never pushed
+backyard: Garden          # name only, inherits NOTIFY_LABELS
+```
+
+`NOTIFY_LABELS` in `.env` is the default for every camera, not a ceiling — a
+camera can widen it as well as narrow it. `labels: []` mutes a camera in the
+bridge alone, leaving Frigate detecting and recording as before. Without a
+`priority`, person events are `high` and everything else is `default`.
+
+Seeded empty, which is a fine way to leave it. A bad value is logged and
+skipped rather than taken down the bridge, so check
+`docker compose logs ntfy-bridge` after editing.
+
+For per-camera control of what's detected in the first place — object lists,
+motion masks, zones, retention — see Frigate's own config: nearly every
+top-level block can be overridden inside a `cameras:` entry, and that's the
+better place to stop something being detected at all rather than merely
+unreported.
 
 ## Time-based camera control
 
@@ -202,6 +230,8 @@ A push titled `Person detected - Front door` should arrive. Watch
 - change `"type"` to `update` → nothing (only new events alert)
 - add `front_door: Porch` to `$APPDATA/ntfy-bridge/cameras-meta.yml`, restart
   the bridge → the title follows the friendly name
+- switch that entry to the mapping form with `labels: [car]`, restart → the
+  same person event stops pushing while other cameras keep working
 
 **2. The scheduler.** Watch the control topics it publishes:
 

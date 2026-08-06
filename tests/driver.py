@@ -90,6 +90,30 @@ EVENTS = [
                                   "label": "person", "top_score": 0.88}},
         True,
     ),
+    (
+        "per-camera labels widen NOTIFY_LABELS -> notifies",
+        {"type": "new", "after": {"id": "evt-dog-2", "camera": "garage",
+                                  "label": "dog", "top_score": 0.72}},
+        True,
+    ),
+    (
+        "per-camera labels narrow NOTIFY_LABELS -> ignored",
+        {"type": "new", "after": {"id": "evt-person-garage", "camera": "garage",
+                                  "label": "person", "top_score": 0.94}},
+        False,
+    ),
+    (
+        "labels: [] mutes the camera -> ignored",
+        {"type": "new", "after": {"id": "evt-person-shed", "camera": "shed",
+                                  "label": "person", "top_score": 0.96}},
+        False,
+    ),
+    (
+        "unparseable priority falls back, camera still notifies",
+        {"type": "new", "after": {"id": "evt-person-side", "camera": "side_yard",
+                                  "label": "person", "top_score": 0.89}},
+        True,
+    ),
 ]
 
 expected_notifications = 0
@@ -139,6 +163,35 @@ if len(got) > 2:
           h3.get("title") == expected_jp, h3.get("title"))
     check("bridge still delivering after malformed/broken events",
           got[2]["is_jpeg"], "last push arrived with its snapshot")
+
+# --- per-camera settings from cameras-meta.yml ---
+# Keyed by event id rather than arrival order, so adding cases above doesn't
+# renumber these.
+by_event = {}
+for n in got:
+    h = {k.lower(): v for k, v in n["headers"].items()}
+    by_event[h.get("filename", "")] = h
+
+check("per-camera labels widen NOTIFY_LABELS",
+      "evt-dog-2.jpg" in by_event, sorted(by_event))
+check("per-camera labels narrow NOTIFY_LABELS",
+      "evt-person-garage.jpg" not in by_event, sorted(by_event))
+check("labels: [] mutes a camera without touching Frigate",
+      "evt-person-shed.jpg" not in by_event, sorted(by_event))
+
+if "evt-dog-2.jpg" in by_event:
+    hg = by_event["evt-dog-2.jpg"]
+    check("per-camera priority overrides the person/other rule",
+          hg.get("priority") == "low", hg.get("priority"))
+    check("mapping form supplies the display name too",
+          hg.get("title") == "Dog detected - Garage", hg.get("title"))
+
+if "evt-person-side.jpg" in by_event:
+    hs = by_event["evt-person-side.jpg"]
+    check("an unparseable priority is skipped, not fatal",
+          hs.get("priority") == "high", hs.get("priority"))
+    check("the rest of that camera's entry still applies",
+          hs.get("title") == "Person detected - Side yard", hs.get("title"))
 
 # --- scheduler assertions ---
 topics = {t: p for t, p in scheduler_msgs}

@@ -1,14 +1,39 @@
-# Maps Frigate's internal camera key (from frigate's config.yml) to a
-# human-friendly label used in notifications and any custom UI. Frigate
-# itself never reads this file — it's purely for the ntfy-bridge and
-# scheduler services.
+# Per-camera notification settings for ntfy-bridge. Frigate never reads this
+# file — it decides what to *detect*; this decides what to *push*.
 #
 # Seeded to $APPDATA/ntfy-bridge/cameras-meta.yml on first start; edit that
 # copy and `docker compose restart ntfy-bridge` to pick up changes.
 #
-# Empty by default — a camera with no entry here gets its key prettified
-# ("front_door" -> "Front door"), so only cameras whose display name differs
-# from that need a line:
+# Two forms per camera. A plain string is just a display name:
 #
-#   front_door: Porch
 #   backyard: Garden
+#
+# A mapping sets any subset of three keys:
+#
+#   front_door:
+#     name: Porch             # notification title; default is the camera key
+#                             # prettified, e.g. front_door -> "Front door"
+#     labels: [person, car]   # what pushes here; default is NOTIFY_LABELS
+#                             # from .env. Widening is allowed, not just
+#                             # narrowing — [] mutes the camera entirely,
+#                             # while Frigate keeps detecting and recording.
+#     priority: high          # ntfy priority for this camera: min, low,
+#                             # default, high, urgent. Without it, person
+#                             # events are high and everything else default.
+#
+# Empty by default, which is a fine way to leave it — every camera then uses
+# NOTIFY_LABELS and a prettified name. A bad value on one camera is logged and
+# skipped rather than taking the bridge down, so check
+# `docker compose logs ntfy-bridge` after editing.
+#
+# Worked example:
+#
+#   front_door:
+#     name: Porch
+#     labels: [person, car, dog]
+#     priority: high
+#   driveway:
+#     labels: [car]           # people walking past the street don't push
+#   shed:
+#     labels: []              # recorded, never pushed
+#   backyard: Garden          # name only, inherits NOTIFY_LABELS

@@ -1,3 +1,20 @@
 front_door: Front door
 # non-ASCII label: exercises the RFC 2047 header encoding path
 side_gate: 玄関わき
+
+# mapping form: NOTIFY_LABELS is person,car in docker-compose.test.yml, so this
+# camera both widens (dog) and narrows (no person) it, and overrides the
+# person=high/other=default priority rule.
+garage:
+  name: Garage
+  labels: [dog]
+  priority: low
+
+# muted: recorded and detected by Frigate, never pushed
+shed:
+  labels: []
+
+# unparseable values are skipped per key, not fatal for the file or the camera
+side_yard:
+  name: Side yard
+  priority: shouting
