@@ -1,0 +1,167 @@
+mqtt:
+  host: mosquitto
+  port: 1883
+
+# --- Detector: Intel integrated GPU via OpenVINO. Pairs with the plain
+# ghcr.io/blakeblackshear/frigate:stable image and /dev/dri passthrough.
+# Measured ~10ms inference on an Intel iGPU; expect 15-30ms on a Celeron
+# N4505-class UHD, which is still comfortably ahead of the frame rate. ---
+detectors:
+  ov:
+    type: openvino
+    device: GPU
+
+# ssdlite_mobilenet_v2 ships inside the image, so there's nothing to download.
+model:
+  path: /openvino-model/ssdlite_mobilenet_v2.xml
+  labelmap_path: /openvino-model/coco_91cl_bkgr.txt
+  model_type: ssd
+  width: 300
+  height: 300
+  input_tensor: nhwc
+  input_pixel_format: bgr
+
+# Hardware video decode. preset-vaapi covers Intel Gen11 (Jasper Lake: N4505,
+# N5105, N100) and handles both H.264 and H.265 without further tuning.
+# Without this the CPU software-decodes every stream, which a 2-core Celeron
+# cannot sustain.
+ffmpeg:
+  hwaccel_args: preset-vaapi
+
+# NVIDIA alternative — swap the image to :stable-tensorrt and restore the
+# `deploy:` GPU reservation in docker-compose.yml:
+# detectors:
+#   tensorrt:
+#     type: tensorrt
+#     device: 0
+# model:
+#   path: /config/model_cache/tensorrt/yolov7-320.trt
+#   input_tensor: nchw
+#   input_pixel_format: rgb
+#   width: 320
+#   height: 320
+
+# CPU-only fallback. Frigate warns against this and an N4505 will struggle —
+# use it only to prove the stack runs before the iGPU is sorted out:
+# detectors:
+#   cpu1:
+#     type: cpu
+
+# Retention. The pre-0.15 `record.retain` / `record.events` keys were removed
+# in favour of these — a config using the old shape makes Frigate 0.17 refuse
+# to load and fall back to safe mode.
+#   motion.days       = days of motion-only footage (old retain.mode: motion)
+#   continuous.days   = days of 24/7 footage; 0 keeps none
+#   alerts/detections = tracked-object clips (old record.events)
+#
+# Storage cost per tier, largest first - only raise the cheap ones to 90 days:
+#   continuous  every second of footage        ~43 GB/camera/day at 4 Mbps
+#   motion      segments containing motion     roughly 10-30% of continuous
+#   alerts      clips around tracked objects   small
+#   detections  ditto                          small
+#
+# Frigate deletes past-retention recordings itself on a timer - no cron or
+# Unraid script needed. It also force-deletes the oldest hour if free space
+# ever drops below one hour's worth, so retention is a ceiling, not a promise:
+# undersize the disk and you get less than 90 days regardless of what's set.
+record:
+  enabled: true
+  continuous:
+    days: 0
+  # The expensive dial. At 90 days this alone is ~1-2 TB for two 1080p
+  # cameras; raise it only if you have sized storage for it.
+  motion:
+    days: 7
+  alerts:
+    retain:
+      days: 90
+      mode: active_objects
+  detections:
+    retain:
+      days: 90
+      mode: active_objects
+
+detect:
+  enabled: true
+  width: 1280
+  height: 720
+  fps: 5
+
+# Snapshots are single JPEGs - a few hundred KB each, so matching the 90-day
+# clip retention costs very little and keeps notification images resolvable
+# for as long as the clips they point at.
+snapshots:
+  enabled: true
+  retain:
+    default: 90
+
+# Composited multi-camera canvas, e.g. for casting to a TV or embedding as
+# one stream. continuous = both cameras always shown, rather than only
+# appearing on activity. Width/height picked for a 2-camera side-by-side
+# layout at 16:9 each; adjust to taste.
+birdseye:
+  enabled: true
+  # `continuous` re-encodes the composite canvas around the clock. On an N4505
+  # that's a constant tax for a view you rarely watch — `motion` only composites
+  # when something is happening. Switch back to continuous if you cast it to a
+  # always-on display.
+  mode: motion
+  width: 1280
+  height: 720
+  quality: 8
+  layout:
+    max_cameras: 2
+
+# Only alert on zones/objects that matter — reduces false positives from
+# passing cars on the street, blowing branches, etc. Adjust polygon points
+# in the Frigate UI once the camera feed is live.
+objects:
+  track:
+    - person
+    - car
+    - dog
+    - cat
+
+# Each camera feeds Frigate twice: a low-res substream for detection and the
+# full-res main stream for recording. Decoding a 1080p stream just to detect
+# on it is the single biggest CPU cost, and on a 2-core N4505 it's the
+# difference between working and dropping frames. Nearly every IP camera
+# exposes a substream — the path differs by vendor (stream2, subStream,
+# /h264Preview_01_sub, ...), so check yours.
+#
+# `detect.width`/`height` MUST match the substream's actual resolution or
+# Frigate will scale every frame and give the CPU back the work you saved.
+cameras:
+  front_door:
+    ffmpeg:
+      inputs:
+        - path: rtsp://USER:PASS@192.168.1.101:554/stream2
+          roles:
+            - detect
+        - path: rtsp://USER:PASS@192.168.1.101:554/stream1
+          roles:
+            - record
+    detect:
+      width: 640
+      height: 480
+      fps: 5
+    motion:
+      mask: "" # draw in Frigate UI: Settings > Motion Masks
+    birdseye:
+      order: 1
+
+  backyard:
+    ffmpeg:
+      inputs:
+        - path: rtsp://USER:PASS@192.168.1.102:554/stream2
+          roles:
+            - detect
+        - path: rtsp://USER:PASS@192.168.1.102:554/stream1
+          roles:
+            - record
+    detect:
+      width: 640
+      height: 480
+      fps: 5
+    birdseye:
+      order: 2

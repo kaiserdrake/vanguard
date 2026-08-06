@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- Source for vanguard.png. Unraid renders the PNG, not this file: its
+       Docker tab falls back to a question mark for SVG icons. Re-render with
+       ./render-icon.sh after editing.
+
+       Drawn for legibility at 48px, which is roughly the size Unraid shows:
+       three shapes, one silhouette, no detail that survives only when large. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e3a8a"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="lens" x1="0.25" y1="0" x2="0.75" y2="1">
+      <stop offset="0" stop-color="#1d4ed8"/>
+      <stop offset="1" stop-color="#0b1220"/>
+    </linearGradient>
+  </defs>
+
+  <rect x="0" y="0" width="512" height="512" rx="112" fill="url(#bg)"/>
+
+  <!-- Shield: the "guard" half of the name, and a solid white mass so the
+       icon still reads as a distinct shape when it is 48px wide. -->
+  <path d="M256 84 L400 140 V270 C400 348 334 406 256 440 C178 406 112 348 112 270 V140 Z"
+        fill="#ffffff"/>
+
+  <!-- Lens punched out of the shield: the surveillance half. -->
+  <circle cx="256" cy="258" r="74" fill="url(#lens)"/>
+  <circle cx="256" cy="258" r="74" fill="none" stroke="#93c5fd" stroke-width="8"/>
+  <circle cx="256" cy="258" r="30" fill="#0b1220"/>
+  <circle cx="230" cy="230" r="15" fill="#ffffff" opacity="0.9"/>
+</svg>

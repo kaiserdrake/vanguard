@@ -1,0 +1,33 @@
+.env
+.env.local
+.env.production
+
+# Local tooling config — machine-specific, and can accumulate paths/tokens
+.claude/
+
+# Local build override. Deliberately untracked: if it were committed, every
+# clone (production included) would silently build images from source instead
+# of pulling the CI-tested ones. See "Building the images" in the README for
+# the two lines to recreate it when developing.
+docker-compose.override.yml
+
+# Frigate recordings/snapshots when MEDIA_PATH is left at the default
+media/
+
+# Mosquitto runtime state (only config/ is tracked)
+mosquitto/data/
+mosquitto/log/
+
+# generated per-run by tests/run_test.sh
+tests/schedule.yml
+
+__pycache__/
+*.py[cod]
+*.log
+
+# test-deploy profile recordings
+dev-media/
+
+# frigate persistent state (CONFIG_PATH)
+frigate-data/
+dev-config/

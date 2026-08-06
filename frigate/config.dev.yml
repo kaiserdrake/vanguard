@@ -1,0 +1,79 @@
+# Frigate config for the test-deploy profile (docker-compose.dev.yml).
+#
+# Differs from config.yml in exactly three ways, all because a dev box has
+# neither an NVIDIA GPU nor cameras:
+#   - CPU detector instead of tensorrt
+#   - a synthetic RTSP stream instead of real cameras
+#   - short retention, so a test run doesn't fill the disk
+#
+# Object detection will not fire on the synthetic pattern — there are no real
+# people or cars in it. Use the MQTT publish in the README to exercise the
+# notification path.
+mqtt:
+  host: mosquitto
+  port: 1883
+
+# Set reset_admin_password to true and restart to regenerate the admin
+# password; Frigate logs it once at startup. Frigate never clears the flag
+# itself, so set it straight back to false or every restart issues a new one.
+auth:
+  reset_admin_password: false
+
+detectors:
+  ov:
+    type: openvino
+    device: GPU
+
+model:
+  path: /openvino-model/ssdlite_mobilenet_v2.xml
+  labelmap_path: /openvino-model/coco_91cl_bkgr.txt
+  model_type: ssd
+  width: 300
+  height: 300
+  input_tensor: nhwc
+  input_pixel_format: bgr
+
+record:
+  enabled: true
+  continuous:
+    days: 0
+  motion:
+    days: 1
+  alerts:
+    retain:
+      days: 1
+      mode: active_objects
+  detections:
+    retain:
+      days: 1
+      mode: active_objects
+
+detect:
+  enabled: true
+  width: 1280
+  height: 720
+  fps: 5
+
+snapshots:
+  enabled: true
+  retain:
+    default: 1
+
+objects:
+  track:
+    - person
+    - car
+
+cameras:
+  test_cam:
+    ffmpeg:
+      inputs:
+        - path: rtsp://rtsp-server:8554/cam
+          roles:
+            - detect
+            - record
+      input_args: preset-rtsp-generic
+    detect:
+      width: 1280
+      height: 720
+      fps: 5

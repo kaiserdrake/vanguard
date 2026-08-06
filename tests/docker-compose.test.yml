@@ -1,0 +1,51 @@
+# Integration harness: runs the two Python services against a real mosquitto
+# broker and a mock that stands in for both Frigate's HTTP API and ntfy.
+# Frigate itself is not started — it needs a GPU and real RTSP cameras, and
+# everything we own talks to it over MQTT/HTTP, which the mock covers.
+name: vanguard-test
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+
+  mock:
+    image: python:3.12-slim
+    command: python -u /app/mock_server.py
+    volumes:
+      - ./mock_server.py:/app/mock_server.py:ro
+
+  ntfy-bridge:
+    build: ../ntfy-bridge
+    image: vanguard-ntfy-bridge:test
+    depends_on: [mosquitto, mock]
+    volumes:
+      - ./cameras-meta.yml:/config/cameras-meta.yml:ro
+    environment:
+      MQTT_HOST: mosquitto
+      FRIGATE_URL: http://mock:9000
+      FRIGATE_UI_URL: https://frigate.test:8971
+      NTFY_URL: http://mock:9000
+      NTFY_TOPIC: testtopic
+      NTFY_AUTH_TOKEN: tk_testtoken123
+      NOTIFY_LABELS: person,car
+
+  scheduler:
+    build: ../scheduler
+    image: vanguard-scheduler:test
+    depends_on: [mosquitto]
+    volumes:
+      - ./schedule.yml:/config/schedule.yml:ro
+    environment:
+      MQTT_HOST: mosquitto
+      CHECK_INTERVAL_SECONDS: "5"
+      TZ: UTC
+
+  driver:
+    build: ../ntfy-bridge # reused purely for its paho/requests deps
+    image: vanguard-ntfy-bridge:test
+    command: python -u /app/driver.py
+    depends_on: [mosquitto, mock]
+    volumes:
+      - ./driver.py:/app/driver.py:ro

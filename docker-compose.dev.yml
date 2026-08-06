@@ -1,0 +1,89 @@
+# Test-deploy profile: runs the whole stack on a workstation or dev server
+# that has no NVIDIA GPU and no cameras.
+#
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# Standalone on purpose — it does NOT layer on docker-compose.yml, so the
+# production file's tensorrt image and nvidia device reservation stay out of
+# the way entirely. Frigate's UI comes up on 8971 exactly as in production.
+name: vanguard-dev
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: vanguard-dev-mosquitto
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+
+  # Synthetic camera: mediamtx spawns ffmpeg on startup and publishes a test
+  # pattern as RTSP, giving Frigate something real to ingest and record.
+  rtsp-server:
+    image: bluenviron/mediamtx:latest-ffmpeg
+    container_name: vanguard-dev-rtsp
+    restart: unless-stopped
+    environment:
+      MTX_PATHS_CAM_RUNONINIT: >-
+        ffmpeg -re -f lavfi -i testsrc=size=1280x720:rate=5
+        -f lavfi -i sine=frequency=1000
+        -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p
+        -g 10 -c:a aac -f rtsp rtsp://127.0.0.1:8554/cam
+      MTX_PATHS_CAM_RUNONINITRESTART: "yes"
+
+  frigate:
+    # plain :stable — the -tensorrt variant needs an NVIDIA GPU
+    image: ghcr.io/blakeblackshear/frigate:stable
+    container_name: vanguard-dev-frigate
+    restart: unless-stopped
+    shm_size: "256mb"
+    depends_on:
+      - mosquitto
+      - rtsp-server
+    devices:
+      - /dev/dri:/dev/dri # Intel iGPU for the OpenVINO detector + VAAPI decode
+    volumes:
+      # persists frigate.db and the generated admin login across recreates
+      - ./dev-config:/config
+      - ./frigate/config.dev.yml:/config/config.yml:ro
+      - /etc/localtime:/etc/localtime:ro
+      - ./dev-media:/media/frigate
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+    ports:
+      # same single authenticated port as production; 5000 stays unpublished
+      - "8971:8971"
+
+  ntfy-bridge:
+    build: ./ntfy-bridge
+    image: vanguard-ntfy-bridge:dev
+    container_name: vanguard-dev-bridge
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+      - frigate
+    volumes:
+      - ./cameras-meta.yml:/config/cameras-meta.yml:ro
+    environment:
+      MQTT_HOST: mosquitto
+      FRIGATE_URL: http://frigate:5000
+      FRIGATE_UI_URL: ${FRIGATE_UI_URL:-https://localhost:8971}
+      NTFY_URL: ${NTFY_URL:?set NTFY_URL in .env}
+      NTFY_TOPIC: ${NTFY_TOPIC:?set NTFY_TOPIC in .env}
+      NTFY_AUTH_TOKEN: ${NTFY_AUTH_TOKEN:-}
+      NOTIFY_LABELS: ${NOTIFY_LABELS:-person,car,dog,cat}
+
+  scheduler:
+    build: ./scheduler
+    image: vanguard-scheduler:dev
+    container_name: vanguard-dev-scheduler
+    restart: unless-stopped
+    depends_on:
+      - mosquitto
+    volumes:
+      - ./scheduler/schedule.yml:/config/schedule.yml:ro
+    environment:
+      MQTT_HOST: mosquitto
+      CHECK_INTERVAL_SECONDS: "30"
+      TZ: ${TZ:-UTC}

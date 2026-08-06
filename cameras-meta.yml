@@ -1,0 +1,7 @@
+# Maps Frigate's internal camera key (from frigate/config.yml) to a
+# human-friendly label used in notifications and any custom UI. Frigate
+# itself never reads this file — it's purely for the ntfy-bridge and
+# scheduler services.
+
+front_door: Front door
+backyard: Backyard
