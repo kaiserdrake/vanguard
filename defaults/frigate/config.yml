@@ -63,6 +63,21 @@ model:
 # cannot sustain.
 ffmpeg:
   hwaccel_args: preset-vaapi
+  # Audio in recordings. Frigate records into MP4, which carries AAC but not
+  # the G.711/PCM most cameras ship with by default — hence the camera wizard's
+  # "The AAC audio codec is required to support audio in recordings". Frigate's
+  # own default handles it by transcoding, so this is only worth setting to
+  # override that:
+  #   preset-record-generic-audio-aac   (default) -c:v copy -c:a aac — audio
+  #                                     always lands in recordings, at the cost
+  #                                     of an audio-only transcode per camera
+  #   preset-record-generic-audio-copy  -c copy — no transcode, but silent
+  #                                     recordings unless the camera sends AAC
+  #   preset-record-generic             -an — no audio at all, smallest files
+  # The free fix is on the camera: switch its audio encoding to AAC in the
+  # firmware UI, and the default preset copies rather than transcodes.
+  # output_args:
+  #   record: preset-record-generic
 
 # NVIDIA alternative — swap the image to :stable-tensorrt and restore the
 # `deploy:` GPU reservation in docker-compose.yml:
