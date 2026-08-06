@@ -6,9 +6,8 @@ services:
     # ports:
     #   - "1883:1883"
     volumes:
-      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/config:/mosquitto/config:ro
       - ./mosquitto/data:/mosquitto/data
-      - ./mosquitto/log:/mosquitto/log
 
   frigate:
     image: ghcr.io/blakeblackshear/frigate:stable

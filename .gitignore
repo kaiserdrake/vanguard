@@ -16,7 +16,6 @@ media/
 
 # Mosquitto runtime state (only config/ is tracked)
 mosquitto/data/
-mosquitto/log/
 
 # generated per-run by tests/run_test.sh
 tests/schedule.yml
