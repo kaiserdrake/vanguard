@@ -1,0 +1,14 @@
+# Maps Frigate's internal camera key (from frigate's config.yml) to a
+# human-friendly label used in notifications and any custom UI. Frigate
+# itself never reads this file — it's purely for the ntfy-bridge and
+# scheduler services.
+#
+# Seeded to $APPDATA/ntfy-bridge/cameras-meta.yml on first start; edit that
+# copy and `docker compose restart ntfy-bridge` to pick up changes.
+#
+# Empty by default — a camera with no entry here gets its key prettified
+# ("front_door" -> "Front door"), so only cameras whose display name differs
+# from that need a line:
+#
+#   front_door: Porch
+#   backyard: Garden

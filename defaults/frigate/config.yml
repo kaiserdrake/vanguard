@@ -1,6 +1,42 @@
+# Seeded to $APPDATA/frigate/config.yml the first time the stack starts, and
+# never touched again — this copy is the starting point, the copy under
+# $APPDATA is the one Frigate reads and writes. Edit the live one from the
+# Frigate UI (Settings -> Config Editor) or on disk; `git pull` won't clobber
+# it. Delete the live file to fall back to this one on the next start.
 mqtt:
   host: mosquitto
   port: 1883
+
+# Frigate keeps its own TLS on the authenticated port, so the hop from a
+# reverse proxy to this host stays encrypted even when the proxy runs on
+# another machine — nginx doesn't verify upstream certificates, so the
+# self-signed one Frigate generates is fine there. Only turn this off if the
+# proxy terminates TLS *and* nothing can reach the port directly.
+tls:
+  enabled: true
+
+# Login is Frigate's own, on the same authenticated port the LAN uses. That is
+# what makes a notification link work from the internet without a second set of
+# credentials — see "Public access" in the README for the proxy side.
+auth:
+  enabled: true
+  # Only send the session cookie over HTTPS. Safe because every way in is TLS;
+  # setting tls.enabled: false without a proxy in front would leave you unable
+  # to log in at all.
+  cookie_secure: true
+  # 30 days, refreshed daily. A phone follows notification links, and the
+  # 24-hour default means logging in again most days.
+  session_length: 2592000
+  refresh_time: 86400
+  # The only brute-force protection Frigate has — no lockout, no 2FA. Worth
+  # having from the moment the login page is reachable from the internet.
+  failed_login_rate_limit: 1/second;5/minute;20/hour
+  # Fill this in before exposing Frigate through a reverse proxy: without it
+  # every request appears to come from the proxy, so the rate limit above is
+  # one shared bucket and a single attacker locks everyone out. Use the proxy's
+  # address as Frigate sees it.
+  # trusted_proxies:
+  #   - 192.168.1.10/32
 
 # --- Detector: Intel integrated GPU via OpenVINO. Pairs with the plain
 # ghcr.io/blakeblackshear/frigate:stable image and /dev/dri passthrough.
@@ -122,6 +158,12 @@ objects:
     - dog
     - cat
 
+# No cameras out of the box, on purpose: a deployment's cameras are its own,
+# and a placeholder here would be two feeds Frigate retries forever and logs
+# an error about every few seconds. Add yours from the Frigate UI (Settings ->
+# Config Editor) — it writes back to this same file — or paste the commented
+# example below into this block and edit it.
+#
 # Each camera feeds Frigate twice: a low-res substream for detection and the
 # full-res main stream for recording. Decoding a 1080p stream just to detect
 # on it is the single biggest CPU cost, and on a 2-core N4505 it's the
@@ -131,37 +173,38 @@ objects:
 #
 # `detect.width`/`height` MUST match the substream's actual resolution or
 # Frigate will scale every frame and give the CPU back the work you saved.
-cameras:
-  front_door:
-    ffmpeg:
-      inputs:
-        - path: rtsp://USER:PASS@192.168.1.101:554/stream2
-          roles:
-            - detect
-        - path: rtsp://USER:PASS@192.168.1.101:554/stream1
-          roles:
-            - record
-    detect:
-      width: 640
-      height: 480
-      fps: 5
-    motion:
-      mask: "" # draw in Frigate UI: Settings > Motion Masks
-    birdseye:
-      order: 1
-
-  backyard:
-    ffmpeg:
-      inputs:
-        - path: rtsp://USER:PASS@192.168.1.102:554/stream2
-          roles:
-            - detect
-        - path: rtsp://USER:PASS@192.168.1.102:554/stream1
-          roles:
-            - record
-    detect:
-      width: 640
-      height: 480
-      fps: 5
-    birdseye:
-      order: 2
+cameras: {}
+# cameras:
+#   front_door:
+#     ffmpeg:
+#       inputs:
+#         - path: rtsp://USER:PASS@192.168.1.101:554/stream2
+#           roles:
+#             - detect
+#         - path: rtsp://USER:PASS@192.168.1.101:554/stream1
+#           roles:
+#             - record
+#     detect:
+#       width: 640
+#       height: 480
+#       fps: 5
+#     motion:
+#       mask: "" # draw in Frigate UI: Settings > Motion Masks
+#     birdseye:
+#       order: 1
+#
+#   backyard:
+#     ffmpeg:
+#       inputs:
+#         - path: rtsp://USER:PASS@192.168.1.102:554/stream2
+#           roles:
+#             - detect
+#         - path: rtsp://USER:PASS@192.168.1.102:554/stream1
+#           roles:
+#             - record
+#     detect:
+#       width: 640
+#       height: 480
+#       fps: 5
+#     birdseye:
+#       order: 2

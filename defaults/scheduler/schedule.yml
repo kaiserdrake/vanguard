@@ -1,0 +1,35 @@
+# Each entry turns a Frigate control ON during the window and OFF outside
+# it, by publishing to frigate/<camera>/<control>/set over MQTT.
+#
+# control options: enabled | detect | recordings | snapshots
+#   enabled     - fully stops the camera (ffmpeg, detection, recording)
+#   detect      - object detection only (motion detection still runs)
+#   recordings  - recording only
+#   snapshots   - snapshots only
+#
+# Times are HH:MM in the container's local time (set TZ in .env).
+# days: optional list of mon/tue/wed/thu/fri/sat/sun; omit for every day.
+# If start > end (e.g. 22:00 -> 06:00), the window wraps past midnight.
+#
+# Seeded to $APPDATA/scheduler/schedule.yml on first start. Edit that copy —
+# the scheduler re-reads it every check interval, so no restart is needed.
+#
+# Empty by default: with no entries the scheduler idles and every camera stays
+# in whatever state Frigate's own config puts it in. Example entries:
+#
+# schedules:
+#   - camera: front_door
+#     control: enabled
+#     start: "00:00"
+#     end: "23:59"
+#     # always on — a no-op entry, shown here for the shape
+#
+#   - camera: backyard
+#     control: detect
+#     start: "06:00"
+#     end: "23:00"
+#     days: [mon, tue, wed, thu, fri, sat, sun]
+#     # object detection paused overnight to cut false alerts from nocturnal
+#     # animals; motion-only recording (if enabled) keeps running
+
+schedules: []

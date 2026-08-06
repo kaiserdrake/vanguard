@@ -1,0 +1,6 @@
+# Camera labels for the test-deploy profile (docker-compose.dev.yml), mounted
+# read-only straight from the repo — the dev stack has no $APPDATA and seeds
+# nothing. `front_door` is here because the README's manual MQTT test fakes a
+# detection on that camera.
+test_cam: Test camera
+front_door: Front door

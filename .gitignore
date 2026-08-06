@@ -14,8 +14,10 @@ docker-compose.override.yml
 # Frigate recordings/snapshots when MEDIA_PATH is left at the default
 media/
 
-# Mosquitto runtime state (only config/ is tracked)
-mosquitto/data/
+# Live config + state, seeded from defaults/ by the init service, when APPDATA
+# is left at the default. Everything in here is the deployment's, not the
+# repo's — frigate.db, mosquitto's persistence, the edited config.yml.
+data/
 
 # generated per-run by tests/run_test.sh
 tests/schedule.yml
@@ -24,9 +26,7 @@ __pycache__/
 *.py[cod]
 *.log
 
-# test-deploy profile recordings
+# test-deploy profile: recordings and Frigate's own state (dev/ holds its
+# tracked configs; these two are runtime only)
 dev-media/
-
-# frigate persistent state (CONFIG_PATH)
-frigate-data/
 dev-config/

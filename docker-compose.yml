@@ -1,28 +1,61 @@
+# Production stack. Deploy by cloning this repo on the host and running
+# `docker compose up -d` from the checkout — the `init` service stages the
+# default configs into $APPDATA on first start, so there is nothing to copy
+# by hand and nothing to edit inside the checkout.
 services:
+  # Seeds $APPDATA from defaults/ and exits. Copy-if-absent, so it is a no-op
+  # on every start after the first: whatever you have edited under $APPDATA
+  # always wins, and `git pull` can bring in a new default without overwriting
+  # a live config. To take a new default, delete the live file and restart.
+  #
+  # This is why the repo's own config files are never bind-mounted into the
+  # services: Frigate rewrites its config.yml in place (schema migrations, and
+  # every edit made in the UI's Config Editor), which would leave a dirty
+  # working tree that the next `git pull` refuses to fast-forward over.
+  init:
+    image: alpine:3
+    container_name: vanguard-init
+    restart: "no"
+    volumes:
+      - ./defaults:/defaults:ro
+      - ${APPDATA:-./data}:/appdata
+    command:
+      - sh
+      - -euc
+      - |
+        cd /defaults
+        # What gets created inherits $$APPDATA's ownership rather than root's,
+        # so pre-creating the directory as yourself is enough to edit
+        # schedule.yml or cameras-meta.yml later without sudo. When docker
+        # created $$APPDATA itself it is root-owned and this is a no-op.
+        owner=$$(stat -c %u:%g /appdata)
+        find . -mindepth 1 -type d | while read -r d; do
+          [ -d "/appdata/$${d#./}" ] || {
+            mkdir "/appdata/$${d#./}" && chown "$$owner" "/appdata/$${d#./}"
+          }
+        done
+        find . -type f | while read -r f; do
+          src=$${f#./}
+          if [ -e "/appdata/$$src" ]; then
+            echo "keep  $$src (already in \$$APPDATA)"
+          else
+            cp "$$f" "/appdata/$$src" && chown "$$owner" "/appdata/$$src"
+            echo "seed  $$src"
+          fi
+        done
+
   mosquitto:
     image: eclipse-mosquitto:2
     container_name: mosquitto
     restart: unless-stopped
     # ports:
     #   - "1883:1883"
+    depends_on:
+      init:
+        condition: service_completed_successfully
     volumes:
-      - ${APPDATA:-/mnt/user/appdata/vanguard}/mosquitto/config:/mosquitto/config
-      - ${APPDATA:-/mnt/user/appdata/vanguard}/mosquitto/data:/mosquitto/data
-    command:
-      - sh
-      - -c
-      - |
-        if [ ! -f /mosquitto/config/mosquitto.conf ]; then
-          printf '%s\n' \
-            'listener 1883' \
-            'allow_anonymous true' \
-            'persistence true' \
-            'persistence_location /mosquitto/data/' \
-            'log_dest stdout' \
-            > /mosquitto/config/mosquitto.conf
-          echo "seeded default mosquitto.conf"
-        fi
-        exec /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf
+      - ${APPDATA:-./data}/mosquitto/config:/mosquitto/config
+      - ${APPDATA:-./data}/mosquitto/data:/mosquitto/data
 
   frigate:
     image: ghcr.io/blakeblackshear/frigate:stable
@@ -30,7 +63,10 @@ services:
     restart: unless-stopped
     shm_size: "256mb"
     depends_on:
-      - mosquitto
+      init:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_started
     devices:
       - /dev/dri:/dev/dri
     # deploy:
@@ -41,15 +77,21 @@ services:
     #           count: 1
     #           capabilities: [gpu]
     volumes:
-      - ${CONFIG_PATH:-/mnt/user/appdata/vanguard/frigate}:/config
+      # Read-write, and it has to be: Frigate migrates and rewrites config.yml
+      # itself, and the UI's Config Editor saves here.
+      - ${APPDATA:-./data}/frigate:/config
       - /etc/localtime:/etc/localtime:ro
-      - ${MEDIA_PATH:-/mnt/user/frigate}:/media/frigate
+      - ${MEDIA_PATH:-./media}:/media/frigate
       - type: tmpfs
         target: /tmp/cache
         tmpfs:
           size: 1000000000
     ports:
-      - "8971:8971"
+      # 8090 on the host, 8971 in the container — the authenticated port is
+      # fixed inside Frigate's nginx, so only the left side is ours to pick.
+      # Whatever it is, it has to match the port in FRIGATE_UI_URL, or a
+      # notification tap opens nothing.
+      - "8090:8971"
       # - "8554:8554"
       # - "8555:8555/tcp"
       # - "8555:8555/udp"
@@ -61,10 +103,14 @@ services:
     container_name: ntfy-bridge
     restart: unless-stopped
     depends_on:
-      - mosquitto
-      - frigate
+      init:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_started
+      frigate:
+        condition: service_started
     volumes:
-      - ${APPDATA:-/mnt/user/appdata/vanguard}/ntfy-bridge:/config
+      - ${APPDATA:-./data}/ntfy-bridge:/config
     environment:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883
@@ -80,9 +126,12 @@ services:
     container_name: camera-scheduler
     restart: unless-stopped
     depends_on:
-      - mosquitto
+      init:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_started
     volumes:
-      - ${APPDATA:-/mnt/user/appdata/vanguard}/scheduler:/config
+      - ${APPDATA:-./data}/scheduler:/config
     environment:
       MQTT_HOST: mosquitto
       MQTT_PORT: 1883

@@ -1,0 +1,12 @@
+# Schedule for the test-deploy profile (docker-compose.dev.yml), mounted
+# read-only straight from the repo. See defaults/scheduler/schedule.yml for
+# what the fields mean.
+#
+# Kept non-empty on purpose: the dev stack is where you watch
+# `mosquitto_sub -t 'frigate/#' -v` and confirm the scheduler publishes
+# anything at all.
+schedules:
+  - camera: test_cam
+    control: detect
+    start: "06:00"
+    end: "23:00"
