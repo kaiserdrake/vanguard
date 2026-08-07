@@ -132,10 +132,23 @@ record:
       days: 90
       mode: active_objects
 
+# `width`/`height` must be the *substream's* real resolution, not the main
+# stream's and not a round number that looks like one. Get it from the camera
+# rather than guessing — anything else is silently expensive:
+#
+#   docker exec frigate /usr/lib/ffmpeg/7.0/bin/ffprobe -v error \
+#     -select_streams v:0 -show_entries stream=width,height -of default=nw=1 \
+#     -rtsp_transport tcp rtsp://USER:PASS@CAMERA_IP:554/stream2
+#
+# Declaring 1280x720 over a 640x360 substream makes ffmpeg upscale every frame
+# on the GPU, copy the 4x-larger frame back to system RAM, and run the CPU-side
+# gamma filter over all of it — inventing detail the source never had. That is
+# the usual cause of Frigate's "<camera> has high FFmpeg CPU usage" warning.
+# 640x360 below is the common substream shape, not a safe default: check yours.
 detect:
   enabled: true
-  width: 1280
-  height: 720
+  width: 640
+  height: 360
   fps: 5
 
 # Snapshots are single JPEGs - a few hundred KB each, so matching the 90-day
@@ -206,7 +219,7 @@ cameras: {}
 #             - record
 #     detect:
 #       width: 640
-#       height: 480
+#       height: 360
 #       fps: 5
 #     motion:
 #       mask: "" # draw in Frigate UI: Settings > Motion Masks
@@ -237,7 +250,7 @@ cameras: {}
 #             - record
 #     detect:
 #       width: 640
-#       height: 480
+#       height: 360
 #       fps: 5
 #     birdseye:
 #       order: 2

@@ -102,6 +102,22 @@ creates is owned by root.
      substream's real resolution. This matters most on low-power hosts — a
      Celeron N4505 cannot software-decode two 1080p streams just to run
      detection on them.
+   - **Measure the substream, don't guess it.** Ask the camera what it actually
+     sends before writing `detect.width`/`height`:
+
+     ```bash
+     docker exec frigate /usr/lib/ffmpeg/7.0/bin/ffprobe -v error -select_streams v:0 -show_entries stream=width,height,codec_name -of default=nw=1 -rtsp_transport tcp rtsp://USER:PASS@CAMERA_IP:554/stream2
+     ```
+
+     A mismatch is silent and costs real CPU: declaring 1280x720 over a 640x360
+     substream makes ffmpeg upscale every frame on the GPU, pull the 4x-larger
+     frame back into system RAM, and run the CPU-side gamma filter over all of
+     it — to invent detail the camera never sent. That is what Frigate's
+     `<camera> has high FFmpeg CPU usage` warning is usually telling you.
+     Correcting it on a two-camera stack took each ffmpeg process from ~35% CPU
+     to ~11%. Once cameras are running, `docker exec frigate ps -eo pcpu,args
+     --sort=-pcpu | head` shows the live ffmpeg command lines — a
+     `scale_vaapi=w=…:h=…` that is *larger* than the source is the tell.
    - The `detectors:` block defaults to OpenVINO on the Intel iGPU; see the
      comments in the file for the NVIDIA/tensorrt and CPU alternatives, and
      update the `image:` tag on the `frigate` service to match if you switch.
