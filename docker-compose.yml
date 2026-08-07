@@ -91,7 +91,7 @@ services:
       # fixed inside Frigate's nginx, so only the left side is ours to pick.
       # Whatever it is, it has to match the port in FRIGATE_UI_URL, or a
       # notification tap opens nothing.
-      - "8090:8971"
+      - "8068:8971"
       # - "8554:8554"
       # - "8555:8555/tcp"
       # - "8555:8555/udp"
