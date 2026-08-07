@@ -108,12 +108,17 @@ creates is owned by root.
    - The `objects.track` list controls what Frigate looks for; `NOTIFY_LABELS`
      in `.env` controls the subset that actually triggers a push. Both can be
      overridden per camera.
+   - `NOTIFY_LABELS` ships as `visitor`, which pushes only for a person inside
+     a camera's visitor zone and needs a `zones:` block on that camera plus a
+     `visitor:` entry in `cameras-meta.yml` to mean anything — see "Person vs
+     visitor" below. Set it to `person,car,dog,cat` for the older
+     everything-notifies behaviour.
 
 6. **Optional, per camera**, both seeded empty and both fine left that way:
-   - `$APPDATA/ntfy-bridge/cameras-meta.yml` — display name, label list and
-     ntfy priority per camera; without an entry the camera uses
-     `NOTIFY_LABELS` and a prettified key (`front_door` → `Front door`). See
-     "Per-camera notifications" below.
+   - `$APPDATA/ntfy-bridge/cameras-meta.yml` — display name, label list,
+     visitor zones and ntfy priority per camera; without an entry the camera
+     uses `NOTIFY_LABELS` and a prettified key (`front_door` → `Front door`).
+     See "Per-camera notifications" below.
    - `$APPDATA/scheduler/schedule.yml` — time-of-day camera control; with no
      entries the scheduler idles.
 
@@ -132,13 +137,14 @@ key (e.g. `front_door`). Frigate never reads it: Frigate decides what to
 *detect*, this decides what to *push*. Edit it and restart `ntfy-bridge`
 (`docker compose restart ntfy-bridge`) to pick up changes.
 
-A plain string is just a display name. A mapping sets any subset of three keys:
+A plain string is just a display name. A mapping sets any subset of four keys:
 
 ```yaml
 front_door:
   name: Porch             # notification title; default is the key prettified
   labels: [person, car]   # what pushes here; default is NOTIFY_LABELS
   priority: high          # min | low | default | high | urgent
+  visitor: [porch]        # Frigate zones that make a person a "visitor"
 driveway:
   labels: [car]           # people on the street don't wake anyone up
 shed:
@@ -149,7 +155,8 @@ backyard: Garden          # name only, inherits NOTIFY_LABELS
 `NOTIFY_LABELS` in `.env` is the default for every camera, not a ceiling — a
 camera can widen it as well as narrow it. `labels: []` mutes a camera in the
 bridge alone, leaving Frigate detecting and recording as before. Without a
-`priority`, person events are `high` and everything else is `default`.
+`priority`, person and visitor events are `high` and everything else is
+`default`.
 
 Seeded empty, which is a fine way to leave it. A bad value is logged and
 skipped rather than taken down the bridge, so check
@@ -160,6 +167,76 @@ motion masks, zones, retention — see Frigate's own config: nearly every
 top-level block can be overridden inside a `cameras:` entry, and that's the
 better place to stop something being detected at all rather than merely
 unreported.
+
+### Person vs visitor
+
+A camera pointed at the front of a house sees two quite different things:
+people passing on the pavement, and people walking up to the door. Frigate
+calls both a `person`. **`visitor`** is this stack's name for the second kind
+— a person inside a zone you drew on that camera — and it exists only in
+ntfy-bridge, which substitutes the label as the event goes past. Frigate is
+untouched: it detects, records and reports every person the same as before, so
+nothing is lost from the timeline by only being notified about some of them.
+
+It takes two pieces, one on each side.
+
+**1. A zone in Frigate**, on the camera, covering the ground someone can only
+be standing on if they came to the house — the path, the steps, the doorway.
+Draw it in the Frigate UI (**Settings → Zones**), which writes it into
+`$APPDATA/frigate/config.yml`:
+
+```yaml
+cameras:
+  front_door:
+    zones:
+      porch:
+        coordinates: 0.35,1.0,0.35,0.45,0.7,0.45,0.7,1.0
+        objects:
+          - person
+```
+
+**2. A `visitor` entry in `cameras-meta.yml`** naming that zone, and a
+`labels` list saying what you actually want pushed:
+
+```yaml
+front_door:
+  name: Front door
+  labels: [visitor]       # only someone at the door pushes
+  visitor: [porch]        # ...and "at the door" means this zone
+backyard:
+  labels: [person]        # no zone here: every person pushes as before
+```
+
+That is the arrangement in the default `.env`: `NOTIFY_LABELS=visitor`, so a
+camera pushes only for someone who approaches it, while Frigate keeps
+detecting and recording everyone. Cameras with no visitor zone are then silent
+until you give them a `labels:` of their own — which is the point, but it does
+mean a stack with no zones configured yet pushes nothing at all.
+
+The longest form spells out which label gets promoted:
+
+```yaml
+driveway:
+  labels: [visitor]
+  visitor:
+    zones: [apron, gate]
+    from: car             # a car that pulled in, not one driving past
+```
+
+Two details worth knowing:
+
+- **Timing.** Someone spotted at the kerb who then walks up to the door pushes
+  when they cross into the zone, not when they first appear — the bridge reads
+  Frigate's event updates, not just the initial event, and either
+  `entered_zones` or `current_zones` counts, so stepping back off the porch
+  after ringing the bell doesn't undo it.
+- **Both labels.** `labels: [person, visitor]` pushes twice for one person who
+  arrives and then approaches: once as a person, once as a visitor. That's
+  deliberate — it is two pieces of news — but it is twice the phone buzzing.
+
+If a `visitor` push never arrives, the zone name is the usual culprit: it has
+to match the zone key under that camera in Frigate's config exactly. Frigate's
+own **Settings → Debug** view shows the zones an object is in as it moves.
 
 ## Time-based camera control
 
@@ -221,17 +298,39 @@ then fake a detection:
 docker exec mosquitto mosquitto_pub -t frigate/events -m '{"type":"new","after":{"id":"test-1","camera":"front_door","label":"person","top_score":0.93}}'
 ```
 
-A push titled `Person detected - Front door` should arrive. Watch
+With the seeded `NOTIFY_LABELS=visitor` this pushes nothing, which is the
+point of the setting — add `front_door: {labels: [person]}` to
+`$APPDATA/ntfy-bridge/cameras-meta.yml` and restart the bridge, and a push
+titled `Person detected - Front door` arrives. Watch
 `docker compose logs -f ntfy-bridge` alongside it. Worth poking at:
 
-- re-run the same command → no second push (deduped on event id)
+- re-run the same command → no second push (deduped on event id and label)
 - change `"id"` to `test-2` → a new push
-- change `"label"` to something outside `NOTIFY_LABELS` → nothing
-- change `"type"` to `update` → nothing (only new events alert)
-- add `front_door: Porch` to `$APPDATA/ntfy-bridge/cameras-meta.yml`, restart
-  the bridge → the title follows the friendly name
-- switch that entry to the mapping form with `labels: [car]`, restart → the
-  same person event stops pushing while other cameras keep working
+- change `"label"` to something outside that camera's `labels` → nothing
+- change `"type"` to `update` → nothing (only new events alert, unless the
+  update is what makes someone a visitor)
+- set `name: Porch` on that entry, restart the bridge → the title follows the
+  friendly name
+- switch `labels` to `[car]`, restart → the same person event stops pushing
+  while other cameras keep working
+
+**Visitor zones**, still without a camera. Give `front_door` a zone rule —
+`labels: [person, visitor]` and `visitor: [porch]` — restart the bridge, then
+fake a person who walks into it:
+
+```bash
+docker exec mosquitto mosquitto_pub -t frigate/events -m '{"type":"new","after":{"id":"test-3","camera":"front_door","label":"person","top_score":0.93,"entered_zones":[]}}'
+```
+
+```bash
+docker exec mosquitto mosquitto_pub -t frigate/events -m '{"type":"update","after":{"id":"test-3","camera":"front_door","label":"person","top_score":0.95,"entered_zones":["porch"]}}'
+```
+
+The first pushes `Person detected`, the second `Visitor detected` for the same
+event. Drop `person` from `labels` and repeat with a fresh `"id"`: only the
+second command pushes. The zone name is entirely between these two commands
+and `cameras-meta.yml` here — Frigate isn't running, and on a real camera it
+is Frigate that decides what goes in `entered_zones`.
 
 **2. The scheduler.** Watch the control topics it publishes:
 

@@ -8,4 +8,12 @@ test_cam:
   name: Test camera
   labels: [person, car, dog]
   priority: low
-front_door: Front door
+
+# Widened to both labels so the manual test can show the difference: a person
+# anywhere pushes as "Person detected", the same person with `porch` in
+# entered_zones pushes again as "Visitor detected". A real front door would
+# usually be `labels: [visitor]` alone.
+front_door:
+  name: Front door
+  labels: [person, visitor]
+  visitor: [porch]

@@ -29,15 +29,68 @@ CAMERA_META_PATH = os.environ.get("CAMERA_META_PATH", "/config/cameras-meta.yml"
 # worth catching once at load time rather than per notification.
 NTFY_PRIORITIES = {"min", "low", "default", "high", "urgent"}
 
+# "visitor" is this bridge's invention, not one of Frigate's object classes:
+# a person Frigate tracked inside one of the camera's visitor zones. Frigate
+# detects a `person` either way — the zone is what separates someone walking
+# up to the door from someone passing on the pavement — so the substitution
+# happens here, between the event arriving and the label filter.
+VISITOR_LABEL = "visitor"
+# Which Frigate label a visitor is promoted from, unless the camera says
+# otherwise. Anything in `objects.track` works: `car` plus a driveway zone
+# gives "a car that pulled in" rather than one driving past.
+VISITOR_BASE_DEFAULT = "person"
+
+
+def parse_visitor_rule(camera: str, value) -> dict | None:
+    """A camera's visitor zones, from any of the three forms allowed:
+
+        visitor: porch                # one zone, promoting `person`
+        visitor: [porch, steps]       # several
+        visitor:
+          zones: [porch]
+          from: person                # which Frigate label gets promoted
+
+    Zone names have to match the zone keys in Frigate's own config for that
+    camera — Frigate reports zones by name in the event, and a name that
+    doesn't exist there simply never matches.
+
+    Returns None for a rule with no usable zones: an empty zone set would
+    silently never promote anything, which on a camera narrowed to
+    `labels: [visitor]` means silence rather than an obvious failure.
+    """
+    base = VISITOR_BASE_DEFAULT
+    if isinstance(value, dict):
+        zones = value.get("zones", [])
+        if value.get("from") is not None:
+            base = str(value["from"]).strip()
+    else:
+        zones = value
+
+    # A bare string is the likely hand-edit slip, same as with `labels`.
+    if isinstance(zones, str):
+        zones = zones.split(",")
+    if not isinstance(zones, list):
+        print(f"[bridge] ignoring visitor rule for {camera}: expected a zone "
+              "name, a list of them, or a mapping with `zones`")
+        return None
+
+    zones = {str(zone).strip() for zone in zones if str(zone).strip()}
+    if not zones:
+        print(f"[bridge] ignoring visitor rule for {camera}: no zone names")
+        return None
+
+    return {"zones": zones, "from": base}
+
 
 def parse_camera_entry(camera: str, entry) -> dict:
     """One camera's overrides, from either form the file allows:
 
         backyard: Garden        # display name only
-        front_door:             # any subset of the three keys
+        front_door:             # any subset of the four keys
           name: Porch
           labels: [person, car]
           priority: high
+          visitor: [porch]
 
     Anything unrecognised is dropped with a log line rather than raised. The
     file is hand-edited on a live system, and a typo on one camera shouldn't
@@ -67,6 +120,11 @@ def parse_camera_entry(camera: str, entry) -> dict:
             meta["labels"] = {str(label).strip() for label in labels}
         else:
             print(f"[bridge] ignoring labels for {camera}: expected a list")
+
+    if entry.get("visitor") is not None:
+        rule = parse_visitor_rule(camera, entry["visitor"])
+        if rule:
+            meta["visitor"] = rule
 
     priority = entry.get("priority")
     if priority is not None:
@@ -121,27 +179,50 @@ def labels_for(camera: str) -> set:
     return NOTIFY_LABELS if labels is None else labels
 
 
+def effective_label(camera: str, after: dict) -> str:
+    """Frigate's label for the object, or "visitor" where the camera has a
+    visitor rule and the object has been in one of its zones.
+
+    Frigate reports zones two ways: `current_zones` is where the object is
+    right now, `entered_zones` every zone it has been in during this event.
+    Either counts — someone who rings the bell and steps back off the porch
+    is still a visitor — so the two are read as one set.
+    """
+    label = after.get("label")
+    rule = CAMERA_META.get(camera, {}).get("visitor")
+    if not rule or label != rule["from"]:
+        return label
+
+    zones = set(after.get("entered_zones") or []) | set(after.get("current_zones") or [])
+    return VISITOR_LABEL if zones & rule["zones"] else label
+
+
 def priority_for(camera: str, label: str) -> str:
     """A camera-wide priority wins where one is set; otherwise people are the
-    thing worth interrupting someone for."""
+    thing worth interrupting someone for — a visitor being a person who got
+    close enough to matter."""
     return CAMERA_META.get(camera, {}).get("priority") or (
-        "high" if label == "person" else "default"
+        "high" if label in ("person", VISITOR_LABEL) else "default"
     )
 
-# Track event ids we've already notified for, so we only push once per
-# event instead of once per MQTT "update" message. Bounded so a long-running
-# container doesn't grow this forever; Frigate ids are time-ordered, and
-# duplicates only ever arrive within seconds of the original.
-MAX_TRACKED_IDS = 1000
-_notified_ids = []
+# Track what we've already notified for, so we only push once per event
+# instead of once per MQTT "update" message. Keyed by event id *and* label,
+# not id alone: one tracked person can push twice on a camera that wants both
+# labels — once when they appear, once when they step into the visitor zone —
+# and that is two different notifications about the same Frigate event.
+# Bounded so a long-running container doesn't grow this forever; Frigate ids
+# are time-ordered, and duplicates only ever arrive within seconds of the
+# original.
+MAX_TRACKED_EVENTS = 1000
+_notified_keys = []
 _notified_set = set()
 
 
-def mark_notified(event_id: str) -> None:
-    _notified_ids.append(event_id)
-    _notified_set.add(event_id)
-    while len(_notified_ids) > MAX_TRACKED_IDS:
-        _notified_set.discard(_notified_ids.pop(0))
+def mark_notified(key: str) -> None:
+    _notified_keys.append(key)
+    _notified_set.add(key)
+    while len(_notified_keys) > MAX_TRACKED_EVENTS:
+        _notified_set.discard(_notified_keys.pop(0))
 
 
 def encode_header(value: str) -> str:
@@ -164,9 +245,10 @@ def fetch_snapshot(event_id: str) -> bytes | None:
         return None
 
 
-def send_ntfy(event: dict, snapshot: bytes | None) -> None:
+def send_ntfy(event: dict, snapshot: bytes | None, label: str) -> None:
+    # `label` is what the notification says, which is not always
+    # `event["label"]` — see effective_label().
     camera = event["camera"]
-    label = event["label"]
     score = round(event.get("top_score", 0) * 100)
     event_id = event["id"]
 
@@ -205,24 +287,38 @@ def on_connect(client, userdata, flags, rc):
 
 
 def handle_event(payload: dict) -> None:
-    if payload.get("type") != "new":
-        return  # only alert once, when the event first starts
-
     after = payload.get("after", {})
     event_id = after.get("id")
-    label = after.get("label")
     camera = after.get("camera")
 
-    if not event_id or event_id in _notified_set:
+    if not event_id or not camera:
+        return
+
+    label = effective_label(camera, after)
+
+    # `new` arrives once, when Frigate first tracks the object, and is the
+    # only message most notifications need. A person who walks into the
+    # visitor zone *after* that only shows up in the updates which follow, so
+    # those are read too — but solely for the promotion, or every camera
+    # would push again on every update. `end` is the backstop for a short
+    # event whose zone entry and exit both fall between two updates.
+    kind = payload.get("type")
+    if kind not in ("new", "update", "end"):
+        return
+    if kind != "new" and label != VISITOR_LABEL:
+        return
+
+    key = f"{event_id}:{label}"
+    if key in _notified_set:
         return
     if label not in labels_for(camera):
         return
 
-    mark_notified(event_id)
+    mark_notified(key)
     # give Frigate a moment to persist the best snapshot for this event
     time.sleep(2)
     snapshot = fetch_snapshot(event_id)
-    send_ntfy(after, snapshot)
+    send_ntfy(after, snapshot, label)
 
 
 def on_message(client, userdata, msg):

@@ -18,3 +18,26 @@ shed:
 side_yard:
   name: Side yard
   priority: shouting
+
+# visitor zones: a person inside `doorstep` pushes as "visitor", a person
+# anywhere else on this camera is detected and recorded but never pushed.
+# The front-door shape.
+porch_cam:
+  name: Porch
+  labels: [visitor]
+  visitor: doorstep
+
+# both labels: one push when a person appears, a second when the same person
+# reaches the zone. Exercises the mapping form and the explicit `from`.
+drive_cam:
+  name: Driveway
+  visitor:
+    zones: [gate, apron]
+    from: person
+  labels: [person, visitor]
+
+# a visitor rule with no zones can never match, so it is dropped rather than
+# left to silence the camera; `labels` still applies
+back_gate:
+  name: Back gate
+  visitor: []

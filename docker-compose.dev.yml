@@ -73,7 +73,7 @@ services:
       NTFY_URL: ${NTFY_URL:?set NTFY_URL in .env}
       NTFY_TOPIC: ${NTFY_TOPIC:?set NTFY_TOPIC in .env}
       NTFY_AUTH_TOKEN: ${NTFY_AUTH_TOKEN:-}
-      NOTIFY_LABELS: ${NOTIFY_LABELS:-person,car,dog,cat}
+      NOTIFY_LABELS: ${NOTIFY_LABELS:-visitor}
 
   scheduler:
     build: ./scheduler

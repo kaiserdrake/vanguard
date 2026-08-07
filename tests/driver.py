@@ -114,6 +114,84 @@ EVENTS = [
                                   "label": "person", "top_score": 0.89}},
         True,
     ),
+    # --- visitor zones. porch_cam is `labels: [visitor], visitor: doorstep`,
+    # drive_cam takes both labels with zones [gate, apron]. ---
+    (
+        "person already in a visitor zone -> notifies as visitor",
+        {"type": "new", "after": {"id": "evt-visit-1", "camera": "porch_cam",
+                                  "label": "person", "top_score": 0.93,
+                                  "entered_zones": ["doorstep"]}},
+        True,
+    ),
+    (
+        "person outside the zone on a visitor-only camera -> ignored",
+        {"type": "new", "after": {"id": "evt-visit-2", "camera": "porch_cam",
+                                  "label": "person", "top_score": 0.90,
+                                  "entered_zones": []}},
+        False,
+    ),
+    (
+        "same person walks into the zone -> the update notifies",
+        {"type": "update", "after": {"id": "evt-visit-2", "camera": "porch_cam",
+                                     "label": "person", "top_score": 0.92,
+                                     "current_zones": ["doorstep"]}},
+        True,
+    ),
+    (
+        "further updates in the zone -> deduped",
+        {"type": "update", "after": {"id": "evt-visit-2", "camera": "porch_cam",
+                                     "label": "person", "top_score": 0.94,
+                                     "current_zones": ["doorstep"],
+                                     "entered_zones": ["doorstep"]}},
+        False,
+    ),
+    (
+        "a zone the rule doesn't list -> not a visitor, so ignored",
+        {"type": "new", "after": {"id": "evt-visit-5", "camera": "porch_cam",
+                                  "label": "person", "top_score": 0.88,
+                                  "entered_zones": ["street"]}},
+        False,
+    ),
+    (
+        "camera taking both labels -> person push when they appear",
+        {"type": "new", "after": {"id": "evt-visit-3", "camera": "drive_cam",
+                                  "label": "person", "top_score": 0.85}},
+        True,
+    ),
+    (
+        "...and a second push for the same event when they reach the zone",
+        {"type": "update", "after": {"id": "evt-visit-3", "camera": "drive_cam",
+                                     "label": "person", "top_score": 0.87,
+                                     "entered_zones": ["gate"]}},
+        True,
+    ),
+    (
+        "...but only one visitor push per event",
+        {"type": "update", "after": {"id": "evt-visit-3", "camera": "drive_cam",
+                                     "label": "person", "top_score": 0.89,
+                                     "entered_zones": ["gate", "apron"]}},
+        False,
+    ),
+    (
+        "`from: person` leaves other labels alone, zone or not",
+        {"type": "new", "after": {"id": "evt-visit-7", "camera": "drive_cam",
+                                  "label": "car", "top_score": 0.81,
+                                  "entered_zones": ["gate"]}},
+        False,
+    ),
+    (
+        "end event is the backstop for a zone visit no update caught",
+        {"type": "end", "after": {"id": "evt-visit-4", "camera": "porch_cam",
+                                  "label": "person", "top_score": 0.91,
+                                  "entered_zones": ["doorstep"]}},
+        True,
+    ),
+    (
+        "a visitor rule with no zones is dropped, camera notifies as usual",
+        {"type": "new", "after": {"id": "evt-visit-6", "camera": "back_gate",
+                                  "label": "person", "top_score": 0.86}},
+        True,
+    ),
 ]
 
 expected_notifications = 0
@@ -122,7 +200,11 @@ for desc, payload, should_notify in EVENTS:
     client.publish("frigate/events", body)
     if should_notify:
         expected_notifications += 1
-    time.sleep(4)  # bridge sleeps 2s before fetching the snapshot
+    # A push costs the bridge 2s of deliberate sleep before it fetches the
+    # snapshot; an ignored event returns immediately. Waiting the full 4s only
+    # where a push is expected keeps arrival order deterministic without
+    # paying for it on every case.
+    time.sleep(4 if should_notify else 1)
 
 time.sleep(5)
 
@@ -192,6 +274,39 @@ if "evt-person-side.jpg" in by_event:
           hs.get("priority") == "high", hs.get("priority"))
     check("the rest of that camera's entry still applies",
           hs.get("title") == "Person detected - Side yard", hs.get("title"))
+
+# --- visitor zones ---
+# One event can legitimately push twice (person, then visitor), so these read
+# the full list rather than by_event, which keeps only the last per event id.
+titles = [
+    ({k.lower(): v for k, v in n["headers"].items()}.get("filename"),
+     {k.lower(): v for k, v in n["headers"].items()}.get("title"))
+    for n in got
+]
+
+check("a person in a visitor zone is pushed as a visitor",
+      ("evt-visit-1.jpg", "Visitor detected - Porch") in titles, str(titles))
+check("a person outside the zone never pushes on a visitor-only camera",
+      not any(f == "evt-visit-5.jpg" for f, _ in titles), str(titles))
+check("walking into the zone mid-event pushes on the update",
+      ("evt-visit-2.jpg", "Visitor detected - Porch") in titles, str(titles))
+check("only one visitor push per event, however many updates follow",
+      sum(1 for f, _ in titles if f == "evt-visit-2.jpg") == 1, str(titles))
+check("an end event still catches a zone visit the updates missed",
+      ("evt-visit-4.jpg", "Visitor detected - Porch") in titles, str(titles))
+check("a camera taking both labels pushes person then visitor",
+      [t for f, t in titles if f == "evt-visit-3.jpg"]
+      == ["Person detected - Driveway", "Visitor detected - Driveway"],
+      str(titles))
+check("`from` limits the promotion to one label",
+      not any(f == "evt-visit-7.jpg" for f, _ in titles), str(titles))
+check("a visitor rule with no zones is dropped, not left muting the camera",
+      ("evt-visit-6.jpg", "Person detected - Back gate") in titles, str(titles))
+
+if "evt-visit-1.jpg" in by_event:
+    check("visitor events get the same high priority as person events",
+          by_event["evt-visit-1.jpg"].get("priority") == "high",
+          by_event["evt-visit-1.jpg"].get("priority"))
 
 # --- scheduler assertions ---
 topics = {t: p for t, p in scheduler_msgs}

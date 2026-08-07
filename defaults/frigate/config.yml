@@ -166,6 +166,11 @@ birdseye:
 # Only alert on zones/objects that matter — reduces false positives from
 # passing cars on the street, blowing branches, etc. Adjust polygon points
 # in the Frigate UI once the camera feed is live.
+#
+# Note "visitor" does not belong here and never will: it is not a class the
+# model can detect, it is ntfy-bridge's name for a `person` inside a camera's
+# visitor zone. Frigate's job is to find every person; the zone (below, per
+# camera) and cameras-meta.yml decide which of them are worth a push.
 objects:
   track:
     - person
@@ -205,6 +210,19 @@ cameras: {}
 #       fps: 5
 #     motion:
 #       mask: "" # draw in Frigate UI: Settings > Motion Masks
+#     # A zone is a polygon inside the frame. This one covers the path and
+#     # doorstep, so a person in it has come to the house rather than walked
+#     # past it — which is what ntfy-bridge turns into a "visitor" push
+#     # (cameras-meta.yml: `visitor: [porch]`). Frigate detects, records and
+#     # reports people outside the zone exactly the same; the zone only says
+#     # where they were. Draw it in the Frigate UI (Settings > Zones) rather
+#     # than guessing coordinates — the pairs below are relative (0-1) x,y
+#     # points and are a placeholder, not a sensible default for your frame.
+#     zones:
+#       porch:
+#         coordinates: 0.35,1.0,0.35,0.45,0.7,0.45,0.7,1.0
+#         objects:
+#           - person
 #     birdseye:
 #       order: 1
 #

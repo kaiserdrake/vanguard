@@ -77,3 +77,12 @@ cameras:
       width: 1280
       height: 720
       fps: 5
+    # Nothing will ever be detected in the synthetic pattern, so this zone is
+    # here to show the shape a visitor zone takes rather than to fire: the
+    # right half of the frame, people only. See dev/cameras-meta.yml for the
+    # bridge side of the pairing.
+    zones:
+      porch:
+        coordinates: 0.5,1.0,0.5,0.0,1.0,0.0,1.0,1.0
+        objects:
+          - person

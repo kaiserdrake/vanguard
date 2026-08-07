@@ -8,7 +8,7 @@
 #
 #   backyard: Garden
 #
-# A mapping sets any subset of three keys:
+# A mapping sets any subset of four keys:
 #
 #   front_door:
 #     name: Porch             # notification title; default is the camera key
@@ -18,19 +18,51 @@
 #                             # narrowing — [] mutes the camera entirely,
 #                             # while Frigate keeps detecting and recording.
 #     priority: high          # ntfy priority for this camera: min, low,
-#                             # default, high, urgent. Without it, person
-#                             # events are high and everything else default.
+#                             # default, high, urgent. Without it, person and
+#                             # visitor events are high, everything else is
+#                             # default.
+#     visitor: [porch]        # Frigate zones that make a person a "visitor" —
+#                             # see below.
 #
 # Empty by default, which is a fine way to leave it — every camera then uses
 # NOTIFY_LABELS and a prettified name. A bad value on one camera is logged and
 # skipped rather than taking the bridge down, so check
 # `docker compose logs ntfy-bridge` after editing.
 #
+# --- Person vs visitor ---------------------------------------------------
+#
+# `visitor` is not one of Frigate's object classes; the bridge invents it. A
+# person Frigate tracked inside one of the listed zones pushes as a "visitor",
+# a person anywhere else on that camera stays a "person" — the difference
+# between someone walking up to the door and someone passing on the pavement.
+# Both are detected and recorded exactly as before; what changes is the label
+# on the notification, and so what `labels:` lets through.
+#
+# Zone names must match the zone keys under that camera in Frigate's own
+# config — draw the polygon in the Frigate UI (Settings -> Zones), which
+# writes it there. A name Frigate doesn't have simply never matches.
+#
+# Three forms, longest last:
+#
+#   visitor: porch
+#   visitor: [porch, steps]
+#   visitor:
+#     zones: [porch]
+#     from: person            # which Frigate label gets promoted; any label
+#                             # in objects.track works, e.g. `car` with a
+#                             # driveway zone = "a car that pulled in"
+#
+# Someone spotted at the kerb who then walks up to the door pushes when they
+# cross into the zone, not when they first appear — so `labels: [visitor]`
+# keeps the camera quiet until someone actually approaches. List both labels
+# to get a push for each: one when they appear, one when they arrive.
+#
 # Worked example:
 #
 #   front_door:
 #     name: Porch
-#     labels: [person, car, dog]
+#     labels: [visitor]       # only someone at the door pushes...
+#     visitor: [porch]        # ...while Frigate still detects every person
 #     priority: high
 #   driveway:
 #     labels: [car]           # people walking past the street don't push
